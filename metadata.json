@@ -1,0 +1,8 @@
+{
+  "name": "Rendimientos de Corte",
+  "description": "Aplicación para lectura inteligente de formatos manuscritos de rendimiento diario de corte de flores y registro en Google Sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

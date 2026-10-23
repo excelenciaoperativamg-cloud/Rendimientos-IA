@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+:root {
+  --brand-navy: #0a2958;
+}
+
+.btn-brand-primary {
+  background-color: #0a2958;
+  color: #ffffff;
+  transition: background-color 0.15s ease-in-out;
+}
+
+.btn-brand-primary:hover {
+  background-color: #071f43;
+}

@@ -1,0 +1,1101 @@
+function probarConexion() {
+  const ss = SpreadsheetApp.openById(
+    '1SgV5hv-Am41A18dt2uXl_Air0V_ttRGQxY7-NcvaXP0'
+  );
+
+  const nombres = ss.getSheets().map(hoja => hoja.getName());
+
+  Logger.log('Archivo: ' + ss.getName());
+  Logger.log('Pestañas: ' + nombres.join(', '));
+
+  ['Rendimientos', 'Maestro', 'Area'].forEach(nombre => {
+    const hoja = ss.getSheetByName(nombre);
+
+    if (!hoja) {
+      throw new Error('No se encontró la pestaña: ' + nombre);
+    }
+
+    Logger.log(
+      nombre + ' — encabezados: ' +
+      hoja.getRange(1, 1, 1, hoja.getLastColumn())
+        .getDisplayValues()[0].join(' | ')
+    );
+  });
+}
+
+function guardarRegistrosAprobados(registros) {
+  if (!Array.isArray(registros) || registros.length === 0) {
+    throw new Error('No hay registros para guardar.');
+  }
+
+  const ss = SpreadsheetApp.openById(ID_ARCHIVO);
+  
+  const hoja = ss.getSheetByName('Rendimientos');
+
+  if (!hoja) throw new Error('No existe la hoja Rendimientos.');
+
+  const encabezados = hoja.getRange(
+    1, 1, 1, hoja.getLastColumn()
+  ).getDisplayValues()[0];
+
+  const catalogos = obtenerCatalogos();
+  const normalizar = v => String(v ?? '').trim().toUpperCase();
+
+  const areas = new Map(catalogos.areas.map(a => [
+    normalizar(a.AreSup),
+    { sede: a.Sede, producto: a.Producto }
+  ]));
+
+  const personas = new Map(catalogos.colaboradores.map(p => [
+    normalizar(p['Código']),
+    normalizar(p.Nombre)
+  ]));
+
+  const requeridos = [
+    'Id_Captura', 'Sede', 'AreSup', 'Producto', 'Código',
+    'Colaborador', 'Fecha', 'Año', 'Sem', 'Hora Inicio',
+    'Hora Fin', 'Duración', 'Total Tallos', 'Rendimiento Hora'
+  ];
+
+  if (requeridos.some(c => !encabezados.includes(c))) {
+    throw new Error('Verifica los encabezados de Rendimientos.');
+  }
+
+  const zona = ss.getSpreadsheetTimeZone();
+  const semanaRegex = /^(\d{2})(\d{2})$/;
+  const filas = [];
+
+  registros.forEach(r => {
+    const id = normalizar(r['Código']);
+    const nombre = normalizar(r.Colaborador);
+    const area = normalizar(r.AreSup);
+    const catArea = areas.get(area);
+
+    if (!catArea) throw new Error('Área no encontrada: ' + area);
+    if (!id || personas.get(id) !== nombre) {
+      throw new Error('Código y nombre no coinciden con Maestro: ' + id);
+    }
+
+    const m = String(r.Sem || '').match(semanaRegex);
+    if (!m) throw new Error('La semana debe tener formato AASS, por ejemplo 2641.');
+
+    const anio = 2000 + Number(m[1]);
+    const numSemana = Number(m[2]);
+    if (numSemana < 1 || numSemana > 53) {
+      throw new Error('Número de semana inválido.');
+    }
+
+    // Semana empresarial: domingo a sábado.
+    // La semana 1 es la que contiene el 1 de enero.
+    const primero = new Date(anio, 0, 1, 12);
+    const domingoInicial = new Date(primero);
+    domingoInicial.setDate(
+      primero.getDate() - primero.getDay() + (primero.getDay() === 0 ? 0 : 0)
+    );
+
+    const domingo = new Date(domingoInicial);
+    domingo.setDate(domingoInicial.getDate() + (numSemana - 1) * 7);
+
+    const fechaTexto = String(r.Fecha || '');
+    const fechaPartes = fechaTexto.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!fechaPartes) throw new Error('Fecha inválida: usa AAAA-MM-DD.');
+
+    const fecha = new Date(
+      Number(fechaPartes[1]),
+      Number(fechaPartes[2]) - 1,
+      Number(fechaPartes[3]),
+      12
+    );
+
+    const diferencia = Math.floor(
+      (fecha.getTime() - domingo.getTime()) / 86400000
+    );
+
+    if (diferencia < 0 || diferencia > 6 ||
+        fecha.getFullYear() !== anio) {
+      throw new Error('La fecha no corresponde a la semana indicada: ' + r.Fecha);
+    }
+
+    const leerHora = valor => {
+      const p = String(valor || '').match(/^(\d{1,2}):(\d{2})$/);
+      if (!p || Number(p[1]) > 23 || Number(p[2]) > 59) {
+        throw new Error('Hora inválida: ' + valor);
+      }
+      return Number(p[1]) * 60 + Number(p[2]);
+    };
+
+    const minInicio = leerHora(r['Hora Inicio']);
+    const minFin = leerHora(r['Hora Fin']);
+
+    if (minFin <= minInicio) {
+      throw new Error('Hora Fin debe ser posterior a Hora Inicio para ' + nombre);
+    }
+
+    const duracion = (minFin - minInicio) / 60;
+    const tallos = Number(r['Total Tallos']);
+
+    if (!Number.isFinite(tallos) || tallos < 0) {
+      throw new Error('Total Tallos inválido para ' + nombre);
+    }
+
+    const horaComoFecha = minutos => {
+      const d = new Date(fecha);
+      d.setHours(Math.floor(minutos / 60), minutos % 60, 0, 0);
+      return d;
+    };
+
+    const valores = {
+      Id_Captura: Utilities.getUuid(),
+      Sede: catArea.sede,
+      AreSup: area,
+      Producto: catArea.producto,
+      'Código': id,
+      Colaborador: nombre,
+      Fecha: fecha,
+      Año: anio,
+      Sem: r.Sem,
+      'Hora Inicio': horaComoFecha(minInicio),
+      'Hora Fin': horaComoFecha(minFin),
+      Duración: duracion,
+      'Total Tallos': tallos,
+      'Rendimiento Hora': duracion > 0 ? tallos / duracion : 0
+    };
+
+    filas.push(encabezados.map(h => valores[h] ?? ''));
+  });
+
+  const bloqueo = LockService.getScriptLock();
+  bloqueo.waitLock(30000);
+
+  try {
+
+const filaInicial = hoja.getLastRow() + 1;
+
+hoja.getRange(
+  filaInicial, 1, filas.length, encabezados.length
+).setValues(filas);
+
+// Mostrar la columna Fecha únicamente como día/mes/año.
+const columnaFecha = encabezados.indexOf('Fecha') + 1;
+
+hoja.getRange(
+  filaInicial, columnaFecha, filas.length, 1
+).setNumberFormat('d/M/yyyy');
+
+  } finally {
+    bloqueo.releaseLock();
+  }
+
+  return { guardados: filas.length };
+}
+function doGet() {
+  return HtmlService
+    .createHtmlOutputFromFile('Index')
+    .setTitle('Rendimientos de Corte');
+}
+
+const ID_ARCHIVO = '1SgV5hv-Am41A18dt2uXl_Air0V_ttRGQxY7-NcvaXP0';
+function obtenerCatalogos() {
+  const ss = SpreadsheetApp.openById(ID_ARCHIVO);
+  const hojaAreas = ss.getSheetByName('Area');
+  const hojaMaestro = ss.getSheetByName('Maestro');
+  const hojaRendimientos = ss.getSheetByName('Rendimientos');
+
+  if (!hojaAreas) {
+    throw new Error('No se encontró la hoja Área.');
+  }
+
+  if (!hojaMaestro) {
+    throw new Error('No se encontró la hoja Maestro.');
+  }
+
+  if (!hojaRendimientos) {
+    throw new Error('No se encontró la hoja Rendimientos.');
+  }
+
+  // Leer áreas, productos y sedes.
+  const datosAreas = hojaAreas.getDataRange().getDisplayValues();
+  const encabezadosAreas = datosAreas[0].map(v =>
+    String(v).trim()
+  );
+
+  const indiceAreSup = encabezadosAreas.indexOf('AreSup');
+  const indiceProducto = encabezadosAreas.indexOf('Producto');
+  const indiceSede = encabezadosAreas.indexOf('Sede');
+
+  if (
+    indiceAreSup === -1 ||
+    indiceProducto === -1 ||
+    indiceSede === -1
+  ) {
+    throw new Error(
+      'La hoja Área debe tener los encabezados AreSup, Producto y Sede.'
+    );
+  }
+
+  const areas = datosAreas.slice(1)
+    .filter(fila => fila[indiceAreSup])
+    .map(fila => ({
+      AreSup: String(fila[indiceAreSup]).trim(),
+      Producto: String(fila[indiceProducto]).trim(),
+      Sede: String(fila[indiceSede]).trim()
+    }));
+
+  // Leer colaboradores e IDs de RH.
+  const datosMaestro = hojaMaestro.getDataRange().getDisplayValues();
+  const encabezadosMaestro = datosMaestro[0].map(v =>
+    String(v).trim()
+  );
+
+  const indiceID = encabezadosMaestro.indexOf('Código');
+  const indiceNombre = encabezadosMaestro.indexOf('Nombre');
+
+  if (indiceID === -1 || indiceNombre === -1) {
+    throw new Error(
+      'La hoja Maestro debe tener los encabezados Código y Nombre.'
+    );
+  }
+
+  const colaboradores = datosMaestro.slice(1)
+    .filter(fila => fila[indiceID] && fila[indiceNombre])
+    .map(fila => ({
+      'Código': String(fila[indiceID]).trim(),
+      Nombre: String(fila[indiceNombre]).trim()
+    }));
+
+  const encabezadosRendimientos =
+    hojaRendimientos.getRange(
+      1, 1, 1, hojaRendimientos.getLastColumn()
+    ).getDisplayValues()[0];
+
+  return {
+    areas: areas,
+    colaboradores: colaboradores,
+    encabezadosRendimientos: encabezadosRendimientos
+  };
+}
+
+/**
+ * Lee fotografías de formatos manuscritos con Gemini.
+ * Recibe imágenes en base64 desde Index.html.
+ * No guarda información en Google Sheets.
+ */
+
+function leerFotografiasGemini(imagenes) {
+  const apiKey = PropertiesService
+    .getScriptProperties()
+    .getProperty('GEMINI_API_KEY');
+
+  if (!apiKey) {
+    throw new Error(
+      'No se encontró GEMINI_API_KEY en las propiedades del script.'
+    );
+  }
+
+  if (!Array.isArray(imagenes) || imagenes.length === 0) {
+    throw new Error('Selecciona al menos una fotografía.');
+  }
+
+  if (imagenes.length > 6) {
+    throw new Error(
+      'Por ahora puedes procesar máximo 6 fotografías por lectura.'
+    );
+  }
+
+  const partes = [{
+    text: `
+Analiza las fotografías de formatos manuscritos de rendimiento de corte
+de flores y devuelve exclusivamente un objeto JSON válido.
+
+La estructura requerida es:
+{
+  "semana": "",
+  "fecha": "",
+  "registros": [
+    {
+      "codigo": "",
+      "area": "",
+      "horaInicio": "",
+      "horaFin": "",
+      "tallos": null,
+      "observaciones": ""
+    }
+  ]
+}
+
+Instrucciones:
+- "semana": código de cuatro dígitos, por ejemplo 2641.
+- "fecha": fecha de trabajo en formato AAAA-MM-DD.
+- La semana usa el calendario de domingo a sábado.
+- Si la fecha no se distingue con seguridad, devuelve "".
+- Lee un registro por cada colaborador visible en el formato.
+- "codigo": código o ID RH del colaborador; no inventes dígitos.
+- "area": código del área, por ejemplo F1, F2, GYPSO o R1.
+- "horaInicio" y "horaFin": formato HH:mm de 24 horas.
+- Si la hora inicial no está escrita o no se puede leer, usa "06:00"
+  y explica en "observaciones" que se asumió esa hora.
+- "tallos": número entero. Si no se puede leer con seguridad, devuelve null.
+- Si un dato es dudoso, deja ese campo vacío o usa null, y explica
+  la duda en "observaciones".
+- No inventes nombres ni códigos de colaboradores.
+- No incluyas filas de títulos, totales generales ni filas vacías.
+- No calcules ni inventes el rendimiento por hora.
+- Si aparecen varias fotografías del mismo formato, evita duplicar
+  registros que sean claramente la misma persona y el mismo dato.
+- Si las fotografías tienen fechas diferentes, no mezcles los datos:
+  indícalo en "observaciones" y deja "fecha" vacía.
+- Devuelve únicamente JSON, sin bloques Markdown ni explicaciones.
+`
+  }];
+
+  imagenes.forEach((imagen, indice) => {
+    if (!imagen || !imagen.data || !imagen.mimeType) {
+      throw new Error(
+        'La fotografía número ' + (indice + 1) +
+        ' no tiene un formato válido.'
+      );
+    }
+
+    const mimeType = String(imagen.mimeType).toLowerCase();
+
+    if (![
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/heic',
+      'image/heif'
+    ].includes(mimeType)) {
+      throw new Error(
+        'Formato de imagen no admitido en la fotografía ' +
+        (indice + 1) + '.'
+      );
+    }
+
+    partes.push({
+      inline_data: {
+        mime_type: mimeType,
+        data: imagen.data
+      }
+    });
+  });
+
+const url =
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent';
+
+  const payload = JSON.stringify({
+    contents: [{
+      role: 'user',
+      parts: partes
+    }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.1,
+      maxOutputTokens: 8192
+    }
+  });
+
+  let respuesta;
+  let codigoHTTP = 0;
+  let textoRespuesta = '';
+
+  // Reintentar solo ante errores temporales del servicio.
+  const maxIntentos = 3;
+  const erroresTemporales = [429, 500, 502, 503, 504];
+
+  for (let intento = 1; intento <= maxIntentos; intento++) {
+    respuesta = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: {
+        'x-goog-api-key': apiKey
+      },
+      payload: payload,
+      muteHttpExceptions: true
+    });
+
+    codigoHTTP = respuesta.getResponseCode();
+    textoRespuesta = respuesta.getContentText();
+
+    if (codigoHTTP >= 200 && codigoHTTP < 300) {
+      break;
+    }
+
+    if (!erroresTemporales.includes(codigoHTTP)) {
+      throw new Error(
+        'Gemini respondió con error (' + codigoHTTP + '): ' +
+        textoRespuesta.substring(0, 700)
+      );
+    }
+
+    if (intento < maxIntentos) {
+      // Esperar 2 segundos y luego 4 segundos.
+      Utilities.sleep(2000 * Math.pow(2, intento - 1));
+    }
+  }
+
+  if (codigoHTTP < 200 || codigoHTTP >= 300) {
+    throw new Error(
+      'Gemini continúa temporalmente ocupado después de ' +
+      maxIntentos + ' intentos (error ' + codigoHTTP + '). ' +
+      'Espera un minuto e inténtalo de nuevo. Detalle: ' +
+      textoRespuesta.substring(0, 400)
+    );
+  }
+
+  let resultado;
+
+  try {
+    resultado = JSON.parse(textoRespuesta);
+  } catch (error) {
+    throw new Error('Gemini devolvió una respuesta que no es JSON válido.');
+  }
+
+  const texto = resultado.candidates &&
+    resultado.candidates[0] &&
+    resultado.candidates[0].content &&
+    resultado.candidates[0].content.parts
+      .map(parte => parte.text || '')
+      .join('');
+
+  if (!texto) {
+    const motivo = resultado.candidates &&
+      resultado.candidates[0] &&
+      resultado.candidates[0].finishReason;
+
+    throw new Error(
+      'Gemini no devolvió datos legibles. ' +
+      'Motivo: ' + (motivo || 'respuesta vacía') +
+      '. Intenta con fotografías más claras o menos imágenes.'
+    );
+  }
+
+  let datos;
+
+  try {
+    datos = JSON.parse(texto);
+  } catch (error) {
+    throw new Error(
+      'La respuesta de lectura no tiene un formato válido. Intenta nuevamente.'
+    );
+  }
+
+  if (!Array.isArray(datos.registros)) {
+    throw new Error(
+      'La lectura no devolvió una lista válida de registros.'
+    );
+  }
+
+  return datos;
+}
+
+
+
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1200px;
+      margin: 25px auto;
+      padding: 0 18px;
+      color: #243047;
+      background: #f5f7fb;
+    }
+    h1 { margin-bottom: 5px; }
+    .sub { color: #64748b; margin-bottom: 24px; }
+    .panel {
+      background: white;
+      border: 1px solid #e0e6ef;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit,minmax(210px,1fr));
+      gap: 14px;
+    }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input, select, button {
+      font: inherit;
+      padding: 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 7px;
+      box-sizing: border-box;
+      max-width: 100%;
+    }
+    input, select { width: 100%; }
+    button {
+      cursor: pointer;
+      background: #176b4d;
+      color: white;
+      border: none;
+      margin: 5px 5px 5px 0;
+    }
+    button.secondary { background: #475569; }
+    button:disabled { opacity: .55; cursor: wait; }
+    .photos {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .photos img {
+      width: 145px;
+      height: 145px;
+      object-fit: contain;
+      background: #f1f5f9;
+      border-radius: 8px;
+    }
+    .table-wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; min-width: 1000px; }
+    th, td {
+      padding: 8px;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+    }
+    th { background: #f1f5f9; }
+    td input, td select { min-width: 100px; }
+    #status { margin-top: 12px; white-space: pre-wrap; }
+    .note { font-size: 13px; color: #64748b; }
+  </style>
+</head>
+<body>
+  <h1>Rendimientos de Corte</h1>
+  <div class="sub">Carga, revisa y consolida los formatos diarios.</div>
+
+  <div class="panel">
+    <h2>1. Fotografías</h2>
+    <label for="photos">Selecciona uno o varios formatos</label>
+    <input id="photos" type="file" accept="image/*" multiple>
+    <div class="note">
+     Selecciona las fotografías para reconocer códigos, áreas,
+     horarios y tallos. Revisa y corrige los datos antes de guardarlos.
+    </div>
+    <div id="photoPreview" class="photos"></div>
+    <button id="readPhotos" type="button" onclick="leerFotografias()">
+  Leer fotografías
+</button>
+  </div>
+
+  <div class="panel">
+    <h2>2. Datos del registro</h2>
+    <div class="grid">
+      <div>
+        <label for="fecha">Fecha de trabajo</label>
+        <input id="fecha" type="date">
+      </div>
+      <div>
+        <label for="sem">Semana</label>
+        <input id="sem" placeholder="Ej. 2641">
+      </div>
+    </div>
+    <p class="note">
+      La hora inicial se asigna a las 06:00.
+      La fecha y la semana deben corresponder al formato.
+    </p>
+    <button type="button" onclick="agregarFila()">+ Agregar colaborador</button>
+  </div>
+
+  <div class="panel">
+    <h2>3. Revisar los registros</h2>
+    <p class="note">
+      Verifica el nombre, el área, la hora final y el total de tallos
+      antes de guardar.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Colaborador</th>
+            <th>Área</th>
+            <th>Hora inicio</th>
+            <th>Hora fin</th>
+            <th>Total tallos</th>
+            <th>Duración (h)</th>
+            <th>Rendimiento/h</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <button type="button" onclick="agregarFila()">+ Agregar fila</button>
+    <button id="save" type="button" onclick="guardar()">Guardar registros aprobados</button>
+    <button class="secondary" type="button" onclick="cargarCatalogos()">Actualizar catálogos</button>
+    <div id="status" role="status">Conectando con Google Sheets...</div>
+  </div>
+
+<script>
+let areas = [];
+let personas = [];
+
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({
+  '&':'&amp;', '<':'&lt;', '>':'&gt;',
+  '"':'&quot;', "'":'&#39;'
+}[c]));
+
+function mensaje(texto) {
+  document.getElementById('status').textContent = texto;
+}
+
+function convertirImagenBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const resultado = String(reader.result);
+      const separador = resultado.indexOf(',');
+
+      if (separador < 0) {
+        reject(new Error('No se pudo leer la fotografía.'));
+        return;
+      }
+
+      resolve({
+        mimeType: file.type,
+        data: resultado.substring(separador + 1)
+      });
+    };
+
+    reader.onerror = () => reject(
+      new Error('Error al cargar ' + file.name)
+    );
+
+    reader.readAsDataURL(file);
+  });
+}
+
+async function leerFotografias() {
+  const archivos = [
+    ...document.getElementById('photos').files
+  ];
+
+  if (!archivos.length) {
+    mensaje('Primero selecciona una o varias fotografías.');
+    return;
+  }
+
+  if (archivos.length > 6) {
+    mensaje('Selecciona máximo 6 fotografías por lectura.');
+    return;
+  }
+
+  const boton = document.getElementById('readPhotos');
+  boton.disabled = true;
+  mensaje('Leyendo fotografías. Espera unos momentos...');
+
+  try {
+    const imagenes = await Promise.all(
+      archivos.map(convertirImagenBase64)
+    );
+
+    google.script.run
+      .withSuccessHandler(datos => {
+        boton.disabled = false;
+        cargarRegistrosReconocidos(datos);
+      })
+      .withFailureHandler(error => {
+        boton.disabled = false;
+        mensaje('No se pudieron leer las fotografías: ' + error.message);
+      })
+      .leerFotografiasGemini(imagenes);
+
+  } catch (error) {
+    boton.disabled = false;
+    mensaje('Error al preparar las fotografías: ' + error.message);
+  }
+}
+
+function obtenerCodigoArea(valor) {
+  return String(valor || '').split('-')[0].trim();
+}
+
+function cargarCatalogos() {
+  mensaje('Prueba 1: iniciando conexión...');
+
+  if (typeof google === 'undefined' ||
+      !google.script ||
+      !google.script.run) {
+    mensaje(
+      'Error: esta página no está ejecutándose dentro de Google Apps Script.'
+    );
+    return;
+  }
+
+  mensaje('Prueba 2: Google Apps Script disponible. Consultando catálogos...');
+
+  let respondio = false;
+
+  google.script.run
+    .withSuccessHandler(data => {
+      respondio = true;
+
+      areas = data.areas || [];
+      personas = data.colaboradores || [];
+
+      document.querySelectorAll('.area').forEach(select => {
+        const valor = select.value;
+        select.innerHTML = opcionesAreas(valor);
+      });
+
+      document.querySelectorAll('.idrh').forEach(input => {
+        actualizarPersona(input.closest('tr'), input.value);
+      });
+
+      mensaje(
+        'Conexión correcta. Áreas: ' + areas.length +
+        '. Colaboradores: ' + personas.length + '.'
+      );
+    })
+    .withFailureHandler(err => {
+      respondio = true;
+      mensaje(
+        'Error de Apps Script: ' +
+        (err && err.message ? err.message : String(err))
+      );
+    })
+    .obtenerCatalogos();
+}
+
+
+function opcionesAreas(seleccionada = '') {
+  return '<option value="">Seleccionar área</option>' +
+    areas.map(a => {
+      const v = a.AreSup || '';
+      const codigo = obtenerCodigoArea(v);
+
+      return '<option value="' + esc(v) + '"' +
+        (v === seleccionada ? ' selected' : '') + '>' +
+        esc(codigo) + '</option>';
+    }).join('');
+}
+
+function agregarFila() {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+  <td><input class="idrh" placeholder="Código"></td>
+  <td><input class="nombre" readonly placeholder="Se busca en Maestro"></td>
+  <td><select class="area">${opcionesAreas()}</select></td>
+  <td><input class="inicio" type="time" value="06:00" required></td>
+  <td><input class="fin" type="time" required></td>
+  <td><input class="tallos" type="number" min="0" step="1" required></td>
+  <td class="duracion">—</td>
+  <td class="rendimiento">—</td>
+  <td><button type="button" class="secondary quitar">Quitar</button></td>
+  `;
+  document.getElementById('rows').appendChild(tr);
+
+  tr.querySelector('.idrh').addEventListener('change', e => {
+    actualizarPersona(tr, e.target.value);
+  });
+
+  tr.querySelector('.quitar').addEventListener('click', () => tr.remove());
+
+  ['inicio', 'fin', 'tallos'].forEach(clase => {
+    tr.querySelector('.' + clase).addEventListener('input', () => calcularFila(tr));
+  });
+}
+
+function actualizarPersona(tr, id) {
+  const codigoBuscado = String(id || '').trim();
+  const campoNombre = tr.querySelector('.nombre');
+
+  if (!codigoBuscado) {
+    campoNombre.value = '';
+    campoNombre.title = '';
+    return;
+  }
+
+  const persona = personas.find(p => {
+    const codigo = String(
+      p['Código'] ?? p['Codigo'] ?? p.codigo ?? ''
+    ).trim();
+
+    return codigo === codigoBuscado;
+  });
+
+  campoNombre.value = persona
+    ? String(persona.Nombre ?? persona.nombre ?? '').trim()
+    : '';
+
+  campoNombre.title = campoNombre.value
+    ? ''
+    : 'Código no encontrado en la hoja Maestro: ' + codigoBuscado;
+
+  if (!campoNombre.value) {
+    mensaje(
+      'No se encontró el código ' + codigoBuscado +
+      ' en Maestro. Verifica el código y actualiza los catálogos.'
+    );
+  }
+
+  calcularFila(tr);
+}
+
+function cargarRegistrosReconocidos(datos) {
+  if (!datos || !Array.isArray(datos.registros)) {
+    mensaje('La lectura no devolvió una lista de registros válida.');
+    return;
+  }
+
+  const fechaInput = document.getElementById('fecha');
+  const semanaInput = document.getElementById('sem');
+
+  // Completar fecha y semana solo cuando tengan un formato válido.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datos.fecha || '')) {
+    fechaInput.value = datos.fecha;
+  }
+
+  if (/^\d{4}$/.test(String(datos.semana || ''))) {
+    semanaInput.value = String(datos.semana);
+  }
+
+  if (datos.registros.length === 0) {
+    mensaje('No se reconocieron colaboradores. Intenta con fotos más claras.');
+    return;
+  }
+
+  // Evitar mezclar silenciosamente filas anteriores con la nueva lectura.
+  if (document.querySelectorAll('#rows tr').length > 0) {
+    const continuar = confirm(
+      'La tabla ya contiene filas. ¿Deseas reemplazarlas con la nueva lectura?'
+    );
+
+    if (!continuar) {
+      mensaje('Lectura recibida, pero no se modificó la tabla existente.');
+      return;
+    }
+  }
+
+  document.getElementById('rows').innerHTML = '';
+
+  let pendientes = 0;
+
+  datos.registros.forEach(registro => {
+    agregarFila();
+
+    const tr = document.querySelector('#rows tr:last-child');
+    const codigo = String(registro.codigo || '').trim();
+
+    tr.querySelector('.idrh').value = codigo;
+    actualizarPersona(tr, codigo);
+
+    const area = String(registro.area || '').trim().toUpperCase();
+    const selectorArea = tr.querySelector('.area');
+
+    const opcionArea = [...selectorArea.options].find(
+      opcion => opcion.value.toUpperCase() === area
+    );
+
+    if (opcionArea) {
+      selectorArea.value = opcionArea.value;
+    } else if (area) {
+      pendientes++;
+      tr.title = 'Revisar área reconocida: ' + area;
+    }
+
+    const inicio = String(registro.horaInicio || '');
+    const fin = String(registro.horaFin || '');
+
+    if (/^\d{2}:\d{2}$/.test(inicio)) {
+      tr.querySelector('.inicio').value = inicio;
+    }
+
+    if (/^\d{2}:\d{2}$/.test(fin)) {
+      tr.querySelector('.fin').value = fin;
+    }
+
+    if (
+      registro.tallos !== null &&
+      registro.tallos !== '' &&
+      Number.isInteger(Number(registro.tallos)) &&
+      Number(registro.tallos) >= 0
+    ) {
+      tr.querySelector('.tallos').value = Number(registro.tallos);
+    } else {
+      pendientes++;
+    }
+
+    const observaciones = String(registro.observaciones || '').trim();
+
+    if (
+      !codigo ||
+      !tr.querySelector('.nombre').value ||
+      !opcionArea ||
+      !fin ||
+      registro.tallos === null ||
+      observaciones
+    ) {
+      pendientes++;
+      tr.title = [
+        tr.title,
+        observaciones
+      ].filter(Boolean).join(' | ');
+    }
+
+    calcularFila(tr);
+  });
+
+  const fechaPendiente = !/^\d{4}-\d{2}-\d{2}$/.test(datos.fecha || '');
+  const semanaPendiente = !/^\d{4}$/.test(String(datos.semana || ''));
+
+  let resumen = 'Lectura terminada. Filas reconocidas: ' +
+    datos.registros.length + '. Revisa todos los datos antes de guardar.';
+
+  if (pendientes > 0 || fechaPendiente || semanaPendiente) {
+    resumen += ' Hay datos pendientes o dudosos.';
+
+    if (fechaPendiente) {
+      resumen += ' Confirma la fecha de trabajo.';
+    }
+
+    if (semanaPendiente) {
+      resumen += ' Confirma la semana de cuatro dígitos.';
+    }
+
+    resumen += ' Pasa el cursor sobre una fila para ver observaciones.';
+  }
+
+  mensaje(resumen);
+}
+
+function calcularFila(tr) {
+  const inicio = tr.querySelector('.inicio').value;
+  const fin = tr.querySelector('.fin').value;
+  const valorTallos = tr.querySelector('.tallos').value;
+
+  if (!inicio || !fin || valorTallos === '') {
+    tr.querySelector('.duracion').textContent = '—';
+    tr.querySelector('.rendimiento').textContent = '—';
+    return;
+  }
+
+  const minutos = hora => {
+    const partes = hora.split(':').map(Number);
+    return partes[0] * 60 + partes[1];
+  };
+
+  const diferencia = minutos(fin) - minutos(inicio);
+  const tallos = Number(valorTallos);
+
+  if (diferencia <= 0 || !Number.isFinite(tallos) || tallos < 0) {
+    tr.querySelector('.duracion').textContent = 'Revisar horas';
+    tr.querySelector('.rendimiento').textContent = '—';
+    return;
+  }
+
+  const duracion = diferencia / 60;
+
+  tr.querySelector('.duracion').textContent = duracion.toFixed(2);
+  tr.querySelector('.rendimiento').textContent =
+    (tallos / duracion).toFixed(2);
+}
+
+function guardar() {
+  const fecha = document.getElementById('fecha').value;
+  const sem = document.getElementById('sem').value.trim();
+  const filas = [...document.querySelectorAll('#rows tr')];
+
+  if (!fecha || !sem || filas.length === 0) {
+    mensaje('Indica la fecha, la semana y agrega al menos un colaborador.');
+    return;
+  }
+
+  const registros = [];
+
+  for (const tr of filas) {
+    const id = tr.querySelector('.idrh').value.trim();
+    const nombre = tr.querySelector('.nombre').value.trim();
+    const area = tr.querySelector('.area').value;
+    const inicio = tr.querySelector('.inicio').value;
+    const fin = tr.querySelector('.fin').value;
+    const tallos = tr.querySelector('.tallos').value;
+
+    if (!id || !nombre || !area || !fin || tallos === '') {
+      mensaje('Completa todos los campos de cada fila antes de guardar.');
+      return;
+    }
+
+    if (Number(tallos) < 0 || !Number.isInteger(Number(tallos))) {
+      mensaje('Total tallos debe ser un entero no negativo.');
+      return;
+    }
+
+    registros.push({
+      'Código': id,
+      Colaborador: nombre,
+      AreSup: area,
+      Fecha: fecha,
+      Sem: sem,
+      'Hora Inicio': inicio,
+      'Hora Fin': fin,
+      'Total Tallos': Number(tallos)
+    });
+  }
+
+  if (!confirm('Se enviarán ' + registros.length +
+      ' registros a Rendimientos. ¿Confirmas que los revisaste?')) return;
+
+  const btn = document.getElementById('save');
+  btn.disabled = true;
+  mensaje('Validando y guardando...');
+
+  google.script.run
+    .withSuccessHandler(res => {
+      btn.disabled = false;
+      mensaje('Registros guardados: ' + res.guardados);
+      document.getElementById('rows').innerHTML = '';
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      mensaje('No se guardaron los registros: ' + err.message);
+    })
+    .guardarRegistrosAprobados(registros);
+}
+
+document.getElementById('photos').addEventListener('change', e => {
+  const cont = document.getElementById('photoPreview');
+  cont.innerHTML = '';
+
+  [...e.target.files].forEach(file => {
+    const img = document.createElement('img');
+    img.alt = file.name;
+    img.title = file.name;
+    img.src = URL.createObjectURL(file);
+    cont.appendChild(img);
+  });
+});
+
+cargarCatalogos();
+agregarFila();
+</script>
+</body>
+
+<script>
+window.onerror = function(error, archivo, linea) {
+  var aviso = document.getElementById('diagnostico-error');
+
+  if (!aviso) {
+    aviso = document.createElement('div');
+    aviso.id = 'diagnostico-error';
+    aviso.style.cssText =
+      'background:#ffe5e5;color:#900;padding:12px;margin:10px;' +
+      'border:1px solid #c00;font-size:14px;';
+    document.body.prepend(aviso);
+  }
+
+  aviso.textContent =
+    'Error de JavaScript: ' + error + ' | Línea: ' + linea;
+
+  return false;
+};
+</script>
+
+</html>
+
+
