@@ -232,20 +232,10 @@ export const YieldTableSection: React.FC<YieldTableSectionProps> = ({
 
 
         {/* Quick summary metrics */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+        <div className="flex items-center space-x-2 text-center bg-slate-50 p-2 rounded-xl border border-slate-200">
           <div className="px-3 py-1">
             <span className="block text-[11px] font-semibold text-slate-500 uppercase">Colaboradores</span>
             <span className="text-sm font-bold text-slate-800 font-mono">{records.length}</span>
-          </div>
-          <div className="px-3 py-1 border-l border-slate-200">
-            <span className="block text-[11px] font-semibold text-slate-500 uppercase">Total Tallos</span>
-            <span className="text-sm font-bold text-emerald-700 font-mono">
-              {totalTallos.toLocaleString('es-CO')}
-            </span>
-          </div>
-          <div className="px-3 py-1 border-l border-slate-200">
-            <span className="block text-[11px] font-semibold text-slate-500 uppercase">Horas Totales</span>
-            <span className="text-sm font-bold text-slate-800 font-mono">{totalHoras.toFixed(2)} h</span>
           </div>
           <div className="px-3 py-1 border-l border-slate-200">
             <span className="block text-[11px] font-semibold text-slate-500 uppercase">Rend./Hora Prom.</span>
