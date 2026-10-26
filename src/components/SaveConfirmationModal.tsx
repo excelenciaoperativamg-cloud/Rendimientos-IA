@@ -166,31 +166,6 @@ export const SaveConfirmationModal: React.FC<SaveConfirmationModalProps> = ({
             </div>
           </div>
 
-          {/* Authentication Alert only if neither scriptUrl nor accessToken is available */}
-          {!hasScriptUrl && !hasAccessToken && (
-            <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl flex items-start justify-between gap-3 text-xs text-amber-900">
-              <div className="flex items-start space-x-2.5">
-                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold">Sesión de Google requerida</p>
-                  <p className="text-amber-800 text-[11px]">
-                    Debes conectar tu cuenta de Google con acceso a Sheets para que la API permita guardar los registros.
-                  </p>
-                </div>
-              </div>
-              {onSignIn && (
-                <button
-                  type="button"
-                  onClick={onSignIn}
-                  className="shrink-0 inline-flex items-center space-x-1.5 px-3 py-1.5 bg-[#0a2958] hover:bg-[#071f43] text-white rounded-lg text-xs font-bold transition-colors"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  <span>Conectar cuenta</span>
-                </button>
-              )}
-            </div>
-          )}
-
           {/* Previous Save Error Display Banner */}
           {saveError && (
             <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-xl flex items-start space-x-3 text-xs text-rose-950 animate-in fade-in duration-200">
@@ -365,7 +340,7 @@ export const SaveConfirmationModal: React.FC<SaveConfirmationModalProps> = ({
             <button
               type="button"
               onClick={onConfirmSave}
-              disabled={isSaving || (!hasScriptUrl && !hasAccessToken)}
+              disabled={isSaving || records.length === 0}
               className="inline-flex items-center space-x-2 px-6 py-2.5 text-xs font-bold text-white bg-[#0a2958] hover:bg-[#071f43] active:bg-[#05152e] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-xs transition-colors"
             >
               {isSaving ? (

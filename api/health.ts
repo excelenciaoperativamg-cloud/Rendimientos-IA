@@ -12,6 +12,7 @@ export default function handler(req: Request, res: Response) {
   res.status(200).json({
     status: 'ok',
     hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+    hasGoogleScriptUrl: Boolean(process.env.GOOGLE_SCRIPT_URL || process.env.VITE_GOOGLE_SCRIPT_URL),
     timestamp: new Date().toISOString(),
   });
 }

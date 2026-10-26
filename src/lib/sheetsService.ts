@@ -674,12 +674,6 @@ export async function saveRegistrosToGoogleSheets(
 ): Promise<{ guardados: number; message: string }> {
   const scriptUrl = scriptUrlOverride || getStoredScriptUrl();
 
-  if (!accessToken && !scriptUrl) {
-    throw new Error(
-      'Se requiere conectar tu cuenta de Google o configurar la URL de Apps Script para guardar registros sin login.'
-    );
-  }
-
   if (!Array.isArray(registros) || registros.length === 0) {
     throw new Error('No hay registros para guardar.');
   }
@@ -791,8 +785,8 @@ export async function saveRegistrosToGoogleSheets(
     rowsToAppend.push(row);
   }
 
-  // 1. Guardar vía Google Apps Script Web App (SIN requerir inicio de sesión a cada usuario)
-  if (scriptUrl) {
+  // 1. Guardar vía Google Apps Script Web App o backend de Vercel (SIN requerir inicio de sesión a cada usuario)
+  if (scriptUrl || !accessToken) {
     const response = await fetch('/api/save-records', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -805,14 +799,19 @@ export async function saveRegistrosToGoogleSheets(
 
     const result = await response.json();
     if (!response.ok || !result.success) {
-      throw new Error(result.error || 'Error al guardar registros mediante Google Apps Script');
+      if (!accessToken) {
+        throw new Error(
+          result.error ||
+            'Error al guardar en Google Sheets. Si acabas de agregar GOOGLE_SCRIPT_URL en Vercel, recuerda hacer Redeploy de la aplicación para que tome efecto.'
+        );
+      }
+    } else {
+      const rowsInserted = result.guardados || rowsToAppend.length;
+      return {
+        guardados: rowsInserted,
+        message: `Se guardaron exitosamente ${rowsInserted} registro(s) en la hoja Rendimientos.`,
+      };
     }
-
-    const rowsInserted = result.guardados || rowsToAppend.length;
-    return {
-      guardados: rowsInserted,
-      message: `Se guardaron exitosamente ${rowsInserted} registro(s) en la hoja Rendimientos.`,
-    };
   }
 
   if (!accessToken) {
