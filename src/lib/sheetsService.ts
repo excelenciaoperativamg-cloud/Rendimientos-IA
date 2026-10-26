@@ -452,7 +452,164 @@ export const saveStoredScriptUrl = (url: string) => {
 };
 
 /**
- * Consulta catálogos a través del backend (/api/catalogs).
+ * Parsea datos provenientes de Google Apps Script Web App
+ */
+export function parseGoogleScriptData(
+  scriptData: any,
+  spreadsheetId: string = DEFAULT_SPREADSHEET_ID
+): CatalogData {
+  if (!scriptData || (!scriptData.maestro && !scriptData.colaboradores)) {
+    throw new Error('La respuesta de Google Apps Script no contiene datos de las hojas Maestro o Area.');
+  }
+
+  const rawColabs = scriptData.colaboradores || scriptData.maestro || [];
+  const rawAreas = scriptData.areas || scriptData.area || [];
+
+  const normH = (s: any) =>
+    String(s || '')
+      .trim()
+      .toUpperCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+  let colaboradores: ColaboradorItem[] = [];
+  if (Array.isArray(rawColabs) && rawColabs.length > 0) {
+    if (Array.isArray(rawColabs[0])) {
+      const headerColabs = rawColabs[0].map(normH);
+      let idxCod = headerColabs.findIndex((h: string) =>
+        ['CODIGO', 'ID RH', 'ID', 'COD', 'CODIGO EMPLEADO', 'DOCUMENTO'].includes(h)
+      );
+      let idxNom = headerColabs.findIndex((h: string) =>
+        ['NOMBRE', 'COLABORADOR', 'NOMBRE COMPLETO', 'NOMBRES', 'EMPLEADO'].includes(h)
+      );
+      if (idxCod === -1 && rawColabs[0].length >= 2) idxCod = 0;
+      if (idxNom === -1 && rawColabs[0].length >= 2) idxNom = 1;
+
+      colaboradores = rawColabs
+        .slice(1)
+        .filter((r: any) => r && r[idxCod] !== undefined && r[idxNom] !== undefined && String(r[idxCod]).trim() !== '')
+        .map((r: any) => ({
+          'Código': normalizarCodigo(r[idxCod]),
+          Nombre: String(r[idxNom] || '').trim(),
+        }));
+    } else {
+      colaboradores = rawColabs.map((c: any) => ({
+        'Código': normalizarCodigo(c['Código'] || c.codigo || c.id),
+        Nombre: String(c.Nombre || c.nombre || '').trim(),
+      }));
+    }
+  }
+
+  let areas: AreaItem[] = [];
+  if (Array.isArray(rawAreas) && rawAreas.length > 0) {
+    if (Array.isArray(rawAreas[0])) {
+      const headerAreas = rawAreas[0].map(normH);
+      let idxAre = headerAreas.findIndex((h: string) =>
+        ['ARESUP', 'AREA', 'ARE_SUP', 'AREASUP', 'BLOQUE'].includes(h)
+      );
+      let idxProd = headerAreas.findIndex((h: string) =>
+        ['PRODUCTO', 'VARIEDAD', 'VAR'].includes(h)
+      );
+      let idxSed = headerAreas.findIndex((h: string) =>
+        ['SEDE', 'FINCA', 'UBICACION'].includes(h)
+      );
+      if (idxAre === -1 && rawAreas[0].length >= 1) idxAre = 0;
+      if (idxProd === -1 && rawAreas[0].length >= 2) idxProd = 1;
+      if (idxSed === -1 && rawAreas[0].length >= 3) idxSed = 2;
+
+      areas = rawAreas
+        .slice(1)
+        .filter((r: any) => r && r[idxAre] !== undefined && String(r[idxAre]).trim() !== '')
+        .map((r: any) => ({
+          AreSup: String(r[idxAre] || '').trim(),
+          Producto: String(r[idxProd] || '').trim(),
+          Sede: String(r[idxSed] || '').trim(),
+        }));
+    } else {
+      areas = rawAreas;
+    }
+  }
+
+  const diagnostics: CatalogDiagnostics = {
+    source: 'google_script_webapp',
+    totalColaboradores: colaboradores.length,
+    totalAreas: areas.length,
+    sampleCodigos: colaboradores.slice(0, 5).map((c) => c['Código']),
+    sampleAreas: areas.slice(0, 5).map((a) => a.AreSup),
+    headerArea: ['AreSup', 'Producto', 'Sede'],
+    headerMaestro: ['Código', 'Nombre'],
+    hasExactCodigoHeader: true,
+    hasExactNombreHeader: true,
+    lastChecked: new Date().toLocaleTimeString('es-CO', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }),
+  };
+
+  return {
+    areas,
+    colaboradores,
+    encabezadosRendimientos: REQUERIDOS_RENDIMIENTOS,
+    spreadsheetId,
+    lastUpdated: diagnostics.lastChecked,
+    diagnostics,
+  };
+}
+
+/**
+ * Consulta catálogos directamente de Google Apps Script Web App o vía backend
+ */
+export async function fetchGoogleScriptCatalogos(
+  scriptUrl: string,
+  spreadsheetId: string = DEFAULT_SPREADSHEET_ID
+): Promise<CatalogData> {
+  const cleanUrl = scriptUrl.trim();
+  if (!cleanUrl) {
+    throw new Error('No se proporcionó la URL de Google Apps Script.');
+  }
+
+  // 1. Intentar consulta directa desde el navegador (rápida y sin depender de servidores intermedios)
+  let responseText = '';
+  try {
+    const res = await fetch(cleanUrl, { redirect: 'follow' });
+    responseText = await res.text();
+  } catch (directErr: any) {
+    console.warn('Consulta directa desde navegador no respondió, probando vía /api/catalogs:', directErr);
+  }
+
+  if (responseText) {
+    try {
+      const data = JSON.parse(responseText);
+      if (data && (data.maestro || data.colaboradores)) {
+        return parseGoogleScriptData(data, spreadsheetId);
+      }
+      if (data && data.success === false) {
+        throw new Error(data.error || 'Error reportado por Apps Script');
+      }
+    } catch (parseErr: any) {
+      if (
+        responseText.includes('accounts.google.com') ||
+        responseText.includes('ServiceLogin') ||
+        responseText.includes('<!DOCTYPE') ||
+        responseText.includes('<html')
+      ) {
+        throw new Error(
+          'Google Apps Script está solicitando inicio de sesión. En el editor de Apps Script ve a "Implementar" > "Administrar implementaciones" > Editar (ícono de lápiz) > en "Quién tiene acceso" selecciona "Cualquier persona" (Anyone), crea una nueva versión y haz clic en "Implementar".'
+        );
+      }
+      if (parseErr.message && parseErr.message.includes('Apps Script')) {
+        throw parseErr;
+      }
+    }
+  }
+
+  // 2. Si falló la consulta directa en el navegador, consultar a través del backend (/api/catalogs)
+  return fetchBackendCatalogos(null, spreadsheetId, cleanUrl);
+}
+
+/**
+ * Consulta catálogos a través del backend (/api/catalogs) o directamente de Apps Script.
  * Admite token de usuario o URL de Google Apps Script Web App (sin login de usuario).
  */
 export async function fetchBackendCatalogos(
@@ -461,6 +618,18 @@ export async function fetchBackendCatalogos(
   scriptUrlOverride?: string
 ): Promise<CatalogData> {
   const scriptUrl = scriptUrlOverride || getStoredScriptUrl();
+
+  // Si hay scriptUrl y no hay token de usuario, intentar consultar directamente a Apps Script primero
+  if (scriptUrl && !accessToken) {
+    try {
+      return await fetchGoogleScriptCatalogos(scriptUrl, spreadsheetId);
+    } catch (scriptErr: any) {
+      if (scriptErr?.message && scriptErr.message.includes('Apps Script')) {
+        throw scriptErr;
+      }
+    }
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };

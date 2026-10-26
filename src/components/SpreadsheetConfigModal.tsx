@@ -25,6 +25,7 @@ import {
   getStoredScriptUrl,
   saveStoredScriptUrl,
   fetchBackendCatalogos,
+  fetchGoogleScriptCatalogos,
 } from '../lib/sheetsService';
 import { googleSignIn } from '../lib/auth';
 
@@ -164,8 +165,8 @@ export const SpreadsheetConfigModal: React.FC<SpreadsheetConfigModalProps> = ({
       }
 
       try {
-        // Probar mediante el endpoint seguro del backend
-        const res = await fetchBackendCatalogos(null, sheetIdInput.trim(), urlToTest);
+        // Probar directamente la URL de Google Apps Script (desde el navegador con fallback)
+        const res = await fetchGoogleScriptCatalogos(urlToTest, sheetIdInput.trim());
         saveStoredScriptUrl(urlToTest);
         await onRefreshCatalogs(urlToTest);
         setTestResult({

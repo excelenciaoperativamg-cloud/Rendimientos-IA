@@ -32,7 +32,7 @@ export interface BatchMetadata {
 }
 
 export interface CatalogDiagnostics {
-  source: 'backend_api' | 'google_sheets_direct' | 'local_seed';
+  source: 'backend_api' | 'google_sheets_direct' | 'local_seed' | 'google_script_webapp';
   totalColaboradores: number;
   totalAreas: number;
   sampleCodigos: string[];
