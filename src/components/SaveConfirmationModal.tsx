@@ -2,14 +2,11 @@ import React, { useMemo } from 'react';
 import {
   AlertTriangle,
   AlertCircle,
-  FileSpreadsheet,
   X,
   Loader2,
   ShieldCheck,
   ArrowRight,
   Clock,
-  LogIn,
-  RotateCcw,
   Sparkles,
 } from 'lucide-react';
 import { YieldRecord, CatalogData } from '../types';
@@ -150,21 +147,6 @@ export const SaveConfirmationModal: React.FC<SaveConfirmationModalProps> = ({
 
         {/* Content body */}
         <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
-          {/* Target destination card */}
-          <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-xl flex items-start space-x-3 text-xs">
-            <FileSpreadsheet className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <p className="font-semibold text-emerald-950">
-                Destino: Hoja <span className="font-mono underline">Rendimientos</span>
-              </p>
-              <p className="text-emerald-800">
-                ID de archivo: <span className="font-mono text-[11px] font-medium">{catalogData.spreadsheetId}</span>
-              </p>
-              <p className="text-[11px] text-emerald-700">
-                Se completarán automáticamente las columnas: <span className="font-mono">Id_Captura, Sede, AreSup, Producto, Código, Colaborador, Fecha, Año, Sem, Hora Inicio, Hora Fin, Duración, Total Tallos, Rendimiento Hora</span>.
-              </p>
-            </div>
-          </div>
 
           {/* Previous Save Error Display Banner */}
           {saveError && (

@@ -142,47 +142,70 @@ Instrucciones detalladas de lectura e integridad:
 14. Devuelve ÚNICAMENTE la estructura JSON solicitada.
 `;
 
+    const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
     let response: any = null;
+    let lastError: any = null;
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: {
-            parts: [
-              ...imageParts,
-              { text: promptText },
-            ],
-          },
-          config: {
-            responseMimeType: 'application/json',
-            temperature: 0.1,
-          },
-        });
-        if (response && response.text) {
+    for (const modelName of modelsToTry) {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          response = await ai.models.generateContent({
+            model: modelName,
+            contents: {
+              parts: [
+                ...imageParts,
+                { text: promptText },
+              ],
+            },
+            config: {
+              responseMimeType: 'application/json',
+              temperature: 0.1,
+            },
+          });
+          if (response && response.text) {
+            break;
+          }
+        } catch (genErr: any) {
+          lastError = genErr;
+          const errMsg = String(genErr?.message || '');
+          const isDailyQuota =
+            errMsg.includes('limit: 20') ||
+            errMsg.includes('per day limit exceeded') ||
+            errMsg.includes('free_tier_requests') ||
+            (errMsg.includes('429') && errMsg.includes('Quota exceeded'));
+
+          // Si este modelo superó la cuota diaria en Free Tier, no reintentar inútilmente y pasar de inmediato al siguiente modelo
+          if (isDailyQuota) {
+            console.warn(`Cuota diaria alcanzada para ${modelName}. Probando siguiente modelo...`);
+            break;
+          }
+
+          const isTemporary =
+            errMsg.includes('503') ||
+            errMsg.includes('high demand') ||
+            errMsg.includes('UNAVAILABLE') ||
+            errMsg.includes('RESOURCE_EXHAUSTED') ||
+            errMsg.includes('429');
+
+          if (isTemporary && attempt < 2) {
+            await new Promise((res) => setTimeout(res, 1200));
+            continue;
+          }
           break;
         }
-      } catch (genErr: any) {
-        const errMsg = String(genErr?.message || '');
-        const isTemporary =
-          errMsg.includes('503') ||
-          errMsg.includes('high demand') ||
-          errMsg.includes('UNAVAILABLE') ||
-          errMsg.includes('RESOURCE_EXHAUSTED') ||
-          errMsg.includes('429');
-
-        if (isTemporary && attempt < 3) {
-          await new Promise((res) => setTimeout(res, attempt * 1200));
-          continue;
-        }
-        throw genErr;
+      }
+      if (response && response.text) {
+        break;
       }
     }
 
     if (!response || !response.text) {
+      if (lastError) {
+        throw lastError;
+      }
       return res.status(200).json({
         success: false,
-        error: 'Gemini no devolvió texto en la respuesta. Intenta con imágenes más nítidas o un lote de menos fotos.',
+        error: 'Gemini no devolvió texto en la respuesta. Intenta con imágenes más nítidas o un lote menor de fotos.',
       });
     }
 
@@ -293,10 +316,18 @@ Instrucciones detalladas de lectura e integridad:
 
     if (userMsg.includes('high demand') || userMsg.includes('503') || userMsg.includes('UNAVAILABLE')) {
       userMsg =
-        'El servicio de Gemini está experimentando alta demanda momentánea. Por favor intenta procesar nuevamente en unos momentos.';
-    } else if (userMsg.includes('429') || userMsg.includes('RESOURCE_EXHAUSTED')) {
+        'El servicio de análisis de Gemini está experimentando alta demanda momentánea. Por favor intenta procesar nuevamente en unos momentos.';
+    } else if (
+      userMsg.includes('limit: 20') ||
+      userMsg.includes('per day limit exceeded') ||
+      userMsg.includes('free_tier_requests') ||
+      userMsg.includes('quota') ||
+      userMsg.includes('Quota') ||
+      userMsg.includes('429') ||
+      userMsg.includes('RESOURCE_EXHAUSTED')
+    ) {
       userMsg =
-        'Límite de peticiones por minuto alcanzado temporalmente. Espera unos segundos e intenta nuevamente.';
+        'Se alcanzó la cuota de solicitudes de la API de Gemini para la clave actual (límite diario en cuenta gratuita). Si tienes otra clave de Gemini, puedes actualizarla en Vercel (Project Settings > Environment Variables > GEMINI_API_KEY) o en los Secretos de la aplicación.';
     }
 
     return res.status(200).json({
