@@ -38,7 +38,11 @@ interface YieldTableSectionProps {
   fecha: string;
   semana: string;
   observacionesGenerales?: string;
-  onUpdateRecord: (id: string, field: keyof YieldRecord, value: any) => void;
+  onUpdateRecord: (
+    id: string,
+    fieldOrUpdates: keyof YieldRecord | Partial<YieldRecord>,
+    value?: any
+  ) => void;
   onAddRecord: () => void;
   onRemoveRecord: (id: string) => void;
   onDuplicateRecord: (record: YieldRecord) => void;
@@ -84,7 +88,6 @@ export const YieldTableSection: React.FC<YieldTableSectionProps> = ({
   // Handle Code changes with auto-filling collaborator name from Maestro
   const handleCodigoChange = (id: string, newCodigo: string) => {
     const rawVal = newCodigo.trim();
-    onUpdateRecord(id, 'codigo', rawVal);
 
     // Valida en Maestro por código o por nombre
     const colabEncontrado =
@@ -92,10 +95,15 @@ export const YieldTableSection: React.FC<YieldTableSectionProps> = ({
       buscarColaboradorPorNombre(rawVal, catalogData.colaboradores);
 
     if (colabEncontrado) {
-      onUpdateRecord(id, 'codigo', colabEncontrado['Código']);
-      onUpdateRecord(id, 'colaborador', colabEncontrado.Nombre);
+      onUpdateRecord(id, {
+        codigo: colabEncontrado['Código'],
+        colaborador: colabEncontrado.Nombre,
+      });
     } else {
-      onUpdateRecord(id, 'colaborador', '');
+      onUpdateRecord(id, {
+        codigo: rawVal,
+        colaborador: '',
+      });
     }
   };
 
@@ -396,10 +404,10 @@ export const YieldTableSection: React.FC<YieldTableSectionProps> = ({
                             onChange={(e) => {
                               const selFecha = e.target.value;
                               const matched = weekDays.find((d) => d.fecha === selFecha);
-                              onUpdateRecord(record.id, 'fecha', selFecha);
-                              if (matched) {
-                                onUpdateRecord(record.id, 'dia', matched.dia);
-                              }
+                              onUpdateRecord(record.id, {
+                                fecha: selFecha,
+                                dia: matched ? matched.dia : record.dia,
+                              });
                             }}
                             className="w-full px-2 py-1 text-xs font-semibold rounded border border-slate-300 bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
                           >
@@ -415,8 +423,10 @@ export const YieldTableSection: React.FC<YieldTableSectionProps> = ({
                             value={record.fecha || fecha}
                             onChange={(e) => {
                               const val = e.target.value;
-                              onUpdateRecord(record.id, 'fecha', val);
-                              onUpdateRecord(record.id, 'dia', getDayOfWeekName(val));
+                              onUpdateRecord(record.id, {
+                                fecha: val,
+                                dia: getDayOfWeekName(val),
+                              });
                             }}
                             className="w-full px-1.5 py-1 text-xs rounded border border-slate-300 bg-white text-slate-800 font-mono"
                           />
@@ -491,11 +501,7 @@ export const YieldTableSection: React.FC<YieldTableSectionProps> = ({
                           type="time"
                           value={record.horaInicio}
                           onChange={(e) => {
-                            const val = e.target.value;
-                            onUpdateRecord(record.id, 'horaInicio', val);
-                            const dur = calculateDurationHours(val, record.horaFin);
-                            onUpdateRecord(record.id, 'duracion', dur || 0);
-                            onUpdateRecord(record.id, 'rendimiento', calculateHourlyYield(record.tallos, dur));
+                            onUpdateRecord(record.id, 'horaInicio', e.target.value);
                           }}
                           className="w-full px-1.5 py-1 text-xs font-mono rounded border border-slate-300 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
                         />
@@ -507,11 +513,7 @@ export const YieldTableSection: React.FC<YieldTableSectionProps> = ({
                           type="time"
                           value={record.horaFin}
                           onChange={(e) => {
-                            const val = e.target.value;
-                            onUpdateRecord(record.id, 'horaFin', val);
-                            const dur = calculateDurationHours(record.horaInicio, val);
-                            onUpdateRecord(record.id, 'duracion', dur || 0);
-                            onUpdateRecord(record.id, 'rendimiento', calculateHourlyYield(record.tallos, dur));
+                            onUpdateRecord(record.id, 'horaFin', e.target.value);
                           }}
                           className={`w-full px-1.5 py-1 text-xs font-mono rounded border ${
                             calculateDurationHours(record.horaInicio, record.horaFin) === null
@@ -530,9 +532,9 @@ export const YieldTableSection: React.FC<YieldTableSectionProps> = ({
                           placeholder="Tallos"
                           value={record.tallos === null || record.tallos === undefined ? '' : record.tallos}
                           onChange={(e) => {
-                            const val = e.target.value === '' ? null : parseInt(e.target.value, 10);
-                            onUpdateRecord(record.id, 'tallos', val);
-                            onUpdateRecord(record.id, 'rendimiento', calculateHourlyYield(val, record.duracion));
+                            const raw = e.target.value;
+                            const val = raw === '' ? null : parseInt(raw, 10);
+                            onUpdateRecord(record.id, 'tallos', val !== null && !isNaN(val) ? val : null);
                           }}
                           className={`w-full px-2 py-1 text-xs font-mono font-semibold text-right rounded border ${
                             record.tallos === null || record.tallos < 0

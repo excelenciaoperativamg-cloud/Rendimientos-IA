@@ -578,13 +578,26 @@ export default function App() {
   };
 
   // --- Records editing ---
-  const handleUpdateRecord = (id: string, field: keyof YieldRecord, value: any) => {
+  const handleUpdateRecord = (
+    id: string,
+    fieldOrUpdates: keyof YieldRecord | Partial<YieldRecord>,
+    value?: any
+  ) => {
     setRecords((prev) =>
       prev.map((r) => {
         if (r.id !== id) return r;
-        const updated = { ...r, [field]: value };
-        // Recalculate duration and yield if hours or tallos change
-        if (field === 'horaInicio' || field === 'horaFin' || field === 'tallos') {
+        const updates =
+          typeof fieldOrUpdates === 'object' && fieldOrUpdates !== null
+            ? fieldOrUpdates
+            : { [fieldOrUpdates]: value };
+
+        const updated = { ...r, ...updates };
+
+        // Recalcular duración y rendimiento cada vez que cambien horas o tallos
+        const hasTimeOrStemsChange =
+          'horaInicio' in updates || 'horaFin' in updates || 'tallos' in updates;
+
+        if (hasTimeOrStemsChange) {
           const normInicio = normalizeTimeFormat(updated.horaInicio, false) || '06:00';
           const normFin = normalizeTimeFormat(updated.horaFin, true, normInicio);
           const dur = calculateDurationHours(normInicio, normFin) || 0;

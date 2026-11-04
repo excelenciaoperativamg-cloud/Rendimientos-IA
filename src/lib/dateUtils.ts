@@ -133,17 +133,16 @@ export function normalizeTimeFormat(
   const min = m[2] !== undefined ? Number(m[2]) : 0;
   if (isNaN(h) || isNaN(min) || h < 0 || h > 23 || min < 0 || min > 59) return clean;
 
-  // Conversión automática de 12 horas a 24 horas para horas de fin en la tarde
-  if (isEndTime) {
-    if (h >= 1 && h <= 6) {
+  // Conversión automática de 12 horas a 24 horas para horas de fin en la tarde:
+  // Solo se convierte sumando 12h si la hora de fin es estrictamente menor que la de inicio
+  // (por ejemplo: inicio 06:00 y fin 01:30 o 02:30, lo cual corresponde a 13:30 o 14:30).
+  // Si la hora de fin ya es mayor a la de inicio (por ejemplo inicio 06:00 y fin 06:30 o 07:00),
+  // se respeta tal como está (ej. 30 minutos de corte matutino).
+  if (isEndTime && startTimeRef) {
+    const minInicio = timeToMinutes(startTimeRef);
+    const minActual = h * 60 + min;
+    if (minInicio !== null && minActual < minInicio && minActual + 720 <= 20 * 60) {
       h += 12;
-    } else if (startTimeRef) {
-      const minInicio = timeToMinutes(startTimeRef);
-      const minActual = h * 60 + min;
-      // Si la hora de fin es menor que la de inicio y al sumarle 12h cae dentro de la jornada laboral
-      if (minInicio !== null && minActual <= minInicio && minActual + 720 <= 19 * 60) {
-        h += 12;
-      }
     }
   }
 
@@ -180,14 +179,15 @@ export function calculateDurationHours(inicio: string, fin: string): number | nu
   if (minInicio === null || minFin === null) return null;
   let diff = minFin - minInicio;
 
-  // Si diff <= 0, verificar si sumando 12h da un turno válido de corte
-  if (diff <= 0) {
+  // Si diff < 0 (la hora fin es menor que la de inicio), verificar si sumando 12h da un turno válido de corte
+  if (diff < 0) {
     const minFinAjustado = minFin + 720;
     if (minFinAjustado - minInicio > 0 && minFinAjustado - minInicio <= 16 * 60) {
       diff = minFinAjustado - minInicio;
     }
   }
 
+  // Si diff <= 0 (las horas son iguales o la hora fin sigue siendo menor), no es una duración válida
   if (diff <= 0) return null;
 
   return diff / 60;
