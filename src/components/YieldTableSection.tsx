@@ -195,7 +195,7 @@ export const YieldTableSection: React.FC<YieldTableSectionProps> = ({
   // Totals & stats
   const totalTallos = records.reduce((acc, r) => acc + (Number(r.tallos) || 0), 0);
   const totalHoras = records.reduce((acc, r) => acc + (r.duracion || 0), 0);
-  const promedioRendimiento = totalHoras > 0 ? totalTallos / totalHoras : 0;
+  const promedioRendimiento = totalHoras > 0 ? Math.round(totalTallos / totalHoras) : 0;
   const countWithErrors = records.filter((r) => getRecordValidation(r).hasError).length;
   const countWithWarnings = records.filter((r) => getRecordValidation(r).hasWarning).length;
 
@@ -248,7 +248,7 @@ export const YieldTableSection: React.FC<YieldTableSectionProps> = ({
           <div className="px-3 py-1 border-l border-slate-200">
             <span className="block text-[11px] font-semibold text-slate-500 uppercase">Rend./Hora Prom.</span>
             <span className="text-sm font-bold text-emerald-700 font-mono">
-              {promedioRendimiento.toFixed(1)} t/h
+              {promedioRendimiento} t/h
             </span>
           </div>
         </div>
@@ -556,7 +556,7 @@ export const YieldTableSection: React.FC<YieldTableSectionProps> = ({
                       {/* Rendimiento / Hora */}
                       <td className="py-2 px-2 text-right font-mono font-bold text-slate-900">
                         {record.rendimiento > 0 ? (
-                          <span className="text-emerald-700">{record.rendimiento.toFixed(1)}</span>
+                          <span className="text-emerald-700">{Math.round(record.rendimiento)}</span>
                         ) : (
                           <span className="text-slate-400">—</span>
                         )}

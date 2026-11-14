@@ -194,13 +194,13 @@ export function calculateDurationHours(inicio: string, fin: string): number | nu
 }
 
 /**
- * Calcula el rendimiento por hora (tallos / horas).
+ * Calcula el rendimiento por hora (tallos / horas), aproximado al entero más cercano.
  */
 export function calculateHourlyYield(tallos: number | null, duracionHoras: number | null): number {
   if (tallos === null || tallos < 0 || !duracionHoras || duracionHoras <= 0) {
     return 0;
   }
-  return tallos / duracionHoras;
+  return Math.round(tallos / duracionHoras);
 }
 
 /**

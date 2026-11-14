@@ -54,7 +54,7 @@ export const SaveConfirmationModal: React.FC<SaveConfirmationModalProps> = ({
 
   const totalTallos = records.reduce((acc, r) => acc + (Number(r.tallos) || 0), 0);
   const totalHoras = records.reduce((acc, r) => acc + (r.duracion || 0), 0);
-  const rendimientoProm = totalHoras > 0 ? totalTallos / totalHoras : 0;
+  const rendimientoProm = totalHoras > 0 ? Math.round(totalTallos / totalHoras) : 0;
 
   const weekInfo = getWeekRange(semana);
 
@@ -241,7 +241,7 @@ export const SaveConfirmationModal: React.FC<SaveConfirmationModalProps> = ({
                 Vista previa de registros a enviar ({records.length})
               </span>
               <span className="text-[11px] text-slate-500 font-mono">
-                Duración total: {totalHoras.toFixed(2)} h • Rendimiento prom: {rendimientoProm.toFixed(1)} t/h
+                Duración total: {totalHoras.toFixed(2)} h • Rendimiento prom: {rendimientoProm} t/h
               </span>
             </div>
 

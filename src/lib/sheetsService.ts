@@ -736,7 +736,7 @@ export async function saveRegistrosToGoogleSheets(
       throw new Error(`Fila ${i + 1} (${nombreOficial}): Total Tallos debe ser un número entero mayor o igual a 0.`);
     }
 
-    const rendimientoHora = duracion > 0 ? tallos / duracion : 0;
+    const rendimientoHora = duracion > 0 ? Math.round(tallos / duracion) : 0;
     const capturaId = typeof crypto !== 'undefined' && crypto.randomUUID
       ? crypto.randomUUID()
       : `CAP-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -778,7 +778,7 @@ export async function saveRegistrosToGoogleSheets(
       'Hora Fin': horaFinNorm,
       Duración: Number(duracion.toFixed(2)),
       'Total Tallos': tallos,
-      'Rendimiento Hora': Number(rendimientoHora.toFixed(2)),
+      'Rendimiento Hora': Math.round(rendimientoHora),
     };
 
     const row = headers.map((h) => recordValues[h] ?? '');
